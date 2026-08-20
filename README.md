@@ -1,36 +1,37 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# freee 勤怠データ管理
 
-## Getting Started
+freeeの「月別データ」から出力したHTML形式の `.xls` を登録し、社員別・月別の登録状況を確認するNext.jsアプリです。UIにはshadcn/ui、DBにはNeon PostgreSQLとDrizzle ORMを使用します。
 
-First, run the development server:
+## セットアップ
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+1. `.env.local` のダミー値をNeonのConnection stringへ置き換えます。
+2. DBテーブルを作成します。
+3. localhost限定で開発サーバーを起動します。
+
+```powershell
+npm install
+npm run db:push
+npm run dev -- --hostname 127.0.0.1
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+ブラウザで `http://127.0.0.1:3000` を開きます。
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## 主な機能
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- `.xls` 内の表示期間と日付範囲から対象年月を判定
+- フルネームをブラウザ内で社員コード・苗字へ変換し、名を破棄
+- 休暇の「日」と「時間」を別々に保存
+- 新入社員、不足社員、苗字変更、同月置換の事前確認
+- 社員×12か月の登録状況、月次明細、社員マスタの表示・編集
 
-## Learn More
+## 個人情報に関する制約
 
-To learn more about Next.js, take a look at the following resources:
+初期版にはログイン制限がありません。開発サーバーは必ず `127.0.0.1` へバインドし、認証を追加するまで外部公開しないでください。元ファイル、社員の名、フルネームはサーバーやDBへ保存しません。
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## 検証
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```powershell
+npm test
+npm run lint
+npm run build
+```
