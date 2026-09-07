@@ -19,6 +19,8 @@ export const attendanceRowSchema = z.object({
   earlyLeaveCount: z.number(),
   scheduledHours: z.number(),
   overtimeHours: z.number(),
+  weekdayOvertimeHours: z.number().optional(),
+  holidayOvertimeHours: z.number().optional(),
   lateHours: z.number(),
   earlyLeaveHours: z.number(),
   breakHours: z.number(),

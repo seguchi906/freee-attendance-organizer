@@ -2,7 +2,36 @@ import { describe, expect, it } from "vitest";
 import {
   detectTargetMonthFromTextOrName,
   parseDayHourValue,
+  parseFreeeXls,
 } from "@/lib/freee-xls-parser";
+
+describe("指定された18列の残業集計", () => {
+  const fields = [
+    "残業 時間", "割増 残業", "深夜 所定", "深夜 所定外", "深夜 残業", "割増 深夜 残業",
+    "法定 休日 所定", "法定 休日 所定外", "法定 休日 残業", "法定 休日 深夜 所定", "法定 休日 深夜 所定外", "法定 休日 深夜 残業",
+    "法定外 休日 所定", "法定外 休日 所定外", "法定外 休日 残業", "法定外 休日 深夜 所定", "法定外 休日 深夜 所定外", "法定外 休日 深夜 残業",
+  ];
+  function parse(hours: string[]) {
+    const headers = ["No.", "所属", "名前", "労働合計", "タイムカード", "所定 時間", "所定外", ...fields];
+    while (headers.length < 49) headers.push(`未使用${headers.length}`);
+    const row = (total: boolean) => `<tr>${headers.map((_, i) => `<td>${i === 0 ? total ? "" : "1" : i === 2 ? total ? "" : "E001 テスト 太郎" : i === 4 ? total ? "合計" : "" : i === 5 || i === 6 ? "100" : i >= 7 && i < 25 ? hours[i - 7] ?? "" : ""}</td>`).join("")}</tr>`;
+    return parseFreeeXls(`<table><tr>${headers.map(h => `<th>${h.replaceAll(" ", "<br>")}</th>`).join("")}</tr>${row(false)}${row(true)}</table>`, "working202608.xls");
+  }
+
+  it("各列を一度ずつ加算し、対象外の所定・所定外を含めない", () => {
+    const result = parse(fields.map((_, i) => String(i + 1)));
+    expect(result.rows[0]).toMatchObject({ overtimeHours: 171, weekdayOvertimeHours: 21, holidayOvertimeHours: 150 });
+    expect(result.totals.overtimeHours).toBe(171);
+    expect(result.rows[0].warnings).toContain("overtime");
+  });
+
+  it("空欄は0として休日分だけでも合計する", () => {
+    const result = parse(fields.map((_, i) => i === 12 ? "11" : i === 14 ? "5.5" : ""));
+    expect(result.rows[0]).toMatchObject({ overtimeHours: 16.5, weekdayOvertimeHours: 0, holidayOvertimeHours: 16.5 });
+    expect(result.totals.overtimeHours).toBe(16.5);
+    expect(result.rows[0].warnings).not.toContain("overtime");
+  });
+});
 
 describe("parseDayHourValue", () => {
   it.each([
@@ -55,5 +84,4 @@ describe("detectTargetMonthFromTextOrName", () => {
     );
   });
 });
-
 
