@@ -36,6 +36,8 @@ export const monthlyAttendance = pgTable("monthly_attendance", {
   earlyLeaveCount: doublePrecision("early_leave_count").notNull(),
   scheduledHours: doublePrecision("scheduled_hours").notNull(),
   overtimeHours: doublePrecision("overtime_hours").notNull(),
+  weekdayOvertimeHours: doublePrecision("weekday_overtime_hours"),
+  holidayOvertimeHours: doublePrecision("holiday_overtime_hours"),
   lateHours: doublePrecision("late_hours").notNull(),
   earlyLeaveHours: doublePrecision("early_leave_hours").notNull(),
   breakHours: doublePrecision("break_hours").notNull(),

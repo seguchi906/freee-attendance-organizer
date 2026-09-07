@@ -157,6 +157,24 @@ function buildWarnings(row: Omit<SanitizedAttendanceRow, "warnings">) {
   return warnings;
 }
 
+// User-defined reporting total: all 18 columns from 残業時間 through 法定外休日深夜残業.
+const weekdayOvertimeFields = [
+  "残業時間", "割増残業", "深夜所定", "深夜所定外", "深夜残業", "割増深夜残業",
+];
+const holidayOvertimeFields = [
+  "法定休日所定", "法定休日所定外", "法定休日残業",
+  "法定休日深夜所定", "法定休日深夜所定外", "法定休日深夜残業",
+  "法定外休日所定", "法定外休日所定外", "法定外休日残業",
+  "法定外休日深夜所定", "法定外休日深夜所定外", "法定外休日深夜残業",
+];
+
+function parseOvertime(values: Record<string, string>) {
+  const sum = (fields: string[]) => fields.reduce((total, field) => total + numberValue(values[field]), 0);
+  const weekdayOvertimeHours = sum(weekdayOvertimeFields);
+  const holidayOvertimeHours = sum(holidayOvertimeFields);
+  return { weekdayOvertimeHours, holidayOvertimeHours, overtimeHours: weekdayOvertimeHours + holidayOvertimeHours };
+}
+
 function parseEmployeeRow(
   values: Record<string, string>,
 ): SanitizedAttendanceRow {
@@ -165,29 +183,7 @@ function parseEmployeeRow(
   const leaves = Object.fromEntries(
     LEAVE_FIELDS.map((field) => [field, parseDayHourValue(value(field))]),
   ) as Record<LeaveField, DayHourValue>;
-  const overtimeHours = numberValue(value("残業 時間"));
-  const weekdayOt =
-    numberValue(value("平日 普通残業 時間")) ||
-    numberValue(value("平日 残業 時間")) ||
-    numberValue(value("平日 時間外労働 時間")) ||
-    numberValue(value("平日 深夜残業 時間"));
-  const holidayOt =
-    numberValue(value("休日 労働 時間")) ||
-    numberValue(value("法定休日 労働 時間")) ||
-    numberValue(value("法定外休日労働 時間")) ||
-    numberValue(value("休日 残業 時間")) ||
-    numberValue(value("休日 出勤 時間"));
-
-  let weekdayOvertimeHours = weekdayOt;
-  const holidayOvertimeHours = holidayOt;
-
-  if (weekdayOvertimeHours === 0 && holidayOvertimeHours === 0) {
-    if (overtimeHours > 0) {
-      weekdayOvertimeHours = overtimeHours;
-    }
-  } else if (overtimeHours > 0 && holidayOvertimeHours > 0 && weekdayOvertimeHours === 0) {
-    weekdayOvertimeHours = Math.max(0, overtimeHours - holidayOvertimeHours);
-  }
+  const { overtimeHours, weekdayOvertimeHours, holidayOvertimeHours } = parseOvertime(values);
 
   const base: Omit<SanitizedAttendanceRow, "warnings"> = {
     ...identity,
@@ -216,7 +212,7 @@ function parseTotals(values: Record<string, string>): ImportTotals {
   const paidLeave = parseDayHourValue(value("有休 日数"));
   return {
     scheduledHours: numberValue(value("所定 時間")),
-    overtimeHours: numberValue(value("残業 時間")),
+    overtimeHours: parseOvertime(values).overtimeHours,
     breakHours: numberValue(value("休憩 時間")),
     totalWorkHours: numberValue(value("労働 合計")),
     paidLeaveDays: paidLeave.days,

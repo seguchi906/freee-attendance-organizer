@@ -160,6 +160,8 @@ export async function POST(request: Request) {
             earlyLeaveCount: row.earlyLeaveCount,
             scheduledHours: row.scheduledHours,
             overtimeHours: row.overtimeHours,
+            weekdayOvertimeHours: row.weekdayOvertimeHours,
+            holidayOvertimeHours: row.holidayOvertimeHours,
             lateHours: row.lateHours,
             earlyLeaveHours: row.earlyLeaveHours,
             breakHours: row.breakHours,

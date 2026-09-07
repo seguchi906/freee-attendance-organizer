@@ -73,6 +73,7 @@ import {
 } from "@/lib/fiscal-year";
 import { parseFreeeXls } from "@/lib/freee-xls-parser";
 import { cn } from "@/lib/utils";
+import { createAttendanceCache } from "@/lib/attendance-cache";
 
 function getEnrollmentStatus(
   employee: Employee,
@@ -131,6 +132,8 @@ function apiPayload(parsed: ParsedAttendanceFile) {
 }
 
 export function AttendanceDashboard() {
+  const [dataCache] = useState(createAttendanceCache);
+  const dashboardRequest = useRef(0);
   const [period, setPeriod] = useState<number>(() =>
     Math.max(MIN_PERIOD, getCurrentPeriod()),
   );
@@ -144,33 +147,43 @@ export function AttendanceDashboard() {
     current: number;
     total: number;
   } | null>(null);
-  const [activeTab, setActiveTab] = useState("status");
+  const [activeTab, setActiveTab] = useState("overtime-summary");
   const [detail, setDetail] = useState<DashboardAttendance | null>(null);
   const [editing, setEditing] = useState<Employee | null>(null);
 
   const loadDashboard = useCallback(async () => {
+    const requestId = ++dashboardRequest.current;
     setLoading(true);
     try {
-      const response = await fetch(`/api/dashboard?period=${period}`, {
-        cache: "no-store",
-      });
+      const response = await dataCache.fetch(`/api/dashboard?period=${period}`);
       const data = await response.json();
       if (!response.ok)
         throw new Error(data.error ?? "登録状況を取得できませんでした。");
-      setDashboard(data);
+      if (requestId === dashboardRequest.current) setDashboard(data);
     } catch (error) {
+      if (requestId !== dashboardRequest.current) return;
       setMessage(
         error instanceof Error
           ? error.message
           : "登録状況を取得できませんでした。",
       );
     } finally {
-      setLoading(false);
+      if (requestId === dashboardRequest.current) setLoading(false);
     }
-  }, [period]);
+  }, [period, dataCache]);
+
+  async function refreshAfterChange() {
+    dataCache.clear();
+    await loadDashboard();
+  }
 
   useEffect(() => {
-    void Promise.resolve().then(loadDashboard);
+    let active = true;
+    void Promise.resolve().then(() => { if (active) return loadDashboard(); });
+    return () => {
+      active = false;
+      dashboardRequest.current++;
+    };
   }, [loadDashboard]);
 
   async function inspectFiles(files: File[]) {
@@ -180,6 +193,7 @@ export function AttendanceDashboard() {
     setBatchProgress(null);
 
     const items: BatchFileItem[] = [];
+    const dashboardsByPeriod = new Map<number, DashboardData>();
 
     for (const file of files) {
       const id = `${file.name}-${file.lastModified}-${Math.random().toString(36).slice(2, 7)}`;
@@ -218,12 +232,27 @@ export function AttendanceDashboard() {
       try {
         const text = await file.text();
         const result = parseFreeeXls(text, file.name);
-        const registered = dashboard.registeredMonths.includes(
+        // Registered months are scoped to a fiscal period. The visible period
+        // may differ from the period of an uploaded historical file.
+        const targetPeriod = getPeriodFromTargetMonth(result.targetMonth);
+        let targetDashboard = dashboardsByPeriod.get(targetPeriod);
+        if (!targetDashboard) {
+          const response = await fetch(`/api/dashboard?period=${targetPeriod}`, {
+            cache: "no-store",
+          });
+          const data = await response.json();
+          if (!response.ok) {
+            throw new Error(data.error ?? "対象月の登録状況を取得できませんでした。");
+          }
+          targetDashboard = data as DashboardData;
+          dashboardsByPeriod.set(targetPeriod, targetDashboard);
+        }
+        const registered = targetDashboard.registeredMonths.includes(
           result.targetMonth,
         );
-        const diff = dashboard.databaseConfigured
+        const diff = targetDashboard.databaseConfigured
           ? compareEmployees(
-              dashboard.employees,
+              targetDashboard.employees,
               result.rows,
               result.targetMonth,
             )
@@ -383,6 +412,7 @@ export function AttendanceDashboard() {
             ),
           );
         } else {
+          dataCache.clear();
           successCount++;
           lastTargetMonth = item.parsed.targetMonth;
           setBatchFiles((prev) =>
@@ -519,7 +549,7 @@ export function AttendanceDashboard() {
         )}
 
         {activeTab === "leave-summary" && (
-          <AllPeriodsVacationSummary />
+          <AllPeriodsVacationSummary dataCache={dataCache} />
         )}
 
         {activeTab === "leave" && (
@@ -532,7 +562,7 @@ export function AttendanceDashboard() {
         )}
 
         {activeTab === "overtime-summary" && (
-          <AllPeriodsOvertimeSummary />
+          <AllPeriodsOvertimeSummary dataCache={dataCache} />
         )}
 
         {activeTab === "overtime" && (
@@ -557,7 +587,7 @@ export function AttendanceDashboard() {
         key={editing?.employeeCode ?? "none"}
         employee={editing}
         onClose={() => setEditing(null)}
-        onSaved={loadDashboard}
+        onSaved={refreshAfterChange}
       />
     </div>
   );
@@ -580,7 +610,7 @@ function sumLeaveHours(row: DashboardAttendance) {
 
 function getWeekdayOvertimeHours(row?: DashboardAttendance | null): number {
   if (!row) return 0;
-  if (typeof row.weekdayOvertimeHours === "number" && row.weekdayOvertimeHours > 0) {
+  if (typeof row.weekdayOvertimeHours === "number") {
     return row.weekdayOvertimeHours;
   }
   const holidayOt = getHolidayOvertimeHours(row);
@@ -589,7 +619,7 @@ function getWeekdayOvertimeHours(row?: DashboardAttendance | null): number {
 
 function getHolidayOvertimeHours(row?: DashboardAttendance | null): number {
   if (!row) return 0;
-  if (typeof row.holidayOvertimeHours === "number" && row.holidayOvertimeHours > 0) {
+  if (typeof row.holidayOvertimeHours === "number") {
     return row.holidayOvertimeHours;
   }
   if (row.holidayAttendanceDays > 0 && row.overtimeHours > 0) {
@@ -649,7 +679,7 @@ type PeriodVacationSummary = {
   lowPaidLeaveEmployees: VacationSummaryEmployee[];
 };
 
-function AllPeriodsVacationSummary() {
+function AllPeriodsVacationSummary({ dataCache }: { dataCache: ReturnType<typeof createAttendanceCache> }) {
   const [summaries, setSummaries] = useState<PeriodVacationSummary[]>([]);
   const [compliance, setCompliance] = useState<PaidLeaveComplianceData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -658,7 +688,7 @@ function AllPeriodsVacationSummary() {
 
   useEffect(() => {
     let active = true;
-    void fetch("/api/vacation-summaries", { cache: "no-store" })
+    void dataCache.fetch("/api/vacation-summaries")
       .then(async (response) => {
         const body = await response.json();
         if (!response.ok) throw new Error(body.error ?? "休暇サマリーを取得できませんでした。");
@@ -683,11 +713,11 @@ function AllPeriodsVacationSummary() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [dataCache]);
 
   useEffect(() => {
     let active = true;
-    void fetch("/api/paid-leave-compliance", { cache: "no-store" })
+    void dataCache.fetch("/api/paid-leave-compliance")
       .then(async (response) => {
         const body = await response.json();
         if (!response.ok)
@@ -708,7 +738,7 @@ function AllPeriodsVacationSummary() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [dataCache]);
 
   return (
     <div className="space-y-4">
@@ -1621,14 +1651,14 @@ const overtimeSummaryMetrics = [
   { key: "overLimit", label: "45h超過者" },
 ] as const;
 
-function AllPeriodsOvertimeSummary() {
+function AllPeriodsOvertimeSummary({ dataCache }: { dataCache: ReturnType<typeof createAttendanceCache> }) {
   const [summaries, setSummaries] = useState<PeriodOvertimeSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   useEffect(() => {
     let active = true;
-    void fetch("/api/overtime-summaries", { cache: "no-store" })
+    void dataCache.fetch("/api/overtime-summaries")
       .then(async (response) => {
         const body = await response.json();
         if (!response.ok)
@@ -1655,10 +1685,13 @@ function AllPeriodsOvertimeSummary() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [dataCache]);
 
   return (
     <div className="space-y-4">
+      <h1 className="text-left text-lg font-semibold tracking-tight text-gray-600">
+        freee-attendance-organizer
+      </h1>
       <div className="rounded-2xl border bg-gradient-to-br from-amber-50 via-background to-orange-50 p-5">
         <div className="flex items-center gap-3">
           <div className="rounded-xl bg-amber-600 p-2 text-white">
@@ -2870,6 +2903,21 @@ function ImportPanel(props: {
   } = props;
   const fileInput = useRef<HTMLInputElement>(null);
 
+  const detailCard = useRef<HTMLDivElement>(null);
+  const [errorDetails, setErrorDetails] = useState<BatchFileItem | null>(null);
+
+  function showFileDetails(item: BatchFileItem) {
+    setActiveFileId(item.id);
+    if (item.error) {
+      setErrorDetails(item);
+    } else {
+      requestAnimationFrame(() => {
+        detailCard.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+        detailCard.current?.focus({ preventScroll: true });
+      });
+    }
+  }
+
   const activeItem =
     batchFiles.find((item) => item.id === activeFileId) ?? batchFiles[0] ?? null;
 
@@ -2957,7 +3005,7 @@ function ImportPanel(props: {
                     let diffVariant: "outline" | "secondary" | "destructive" = "outline";
 
                     if (item.error) {
-                      diffStatus = "解析エラー";
+                      diffStatus = item.parsed ? "登録エラー" : "解析エラー";
                       diffVariant = "destructive";
                     } else if (!databaseConfigured) {
                       diffStatus = "DB未接続";
@@ -2985,7 +3033,7 @@ function ImportPanel(props: {
                           "cursor-pointer transition-colors",
                           isSelected && "bg-blue-50/70 dark:bg-blue-950/30",
                         )}
-                        onClick={() => setActiveFileId(item.id)}
+                        onClick={() => showFileDetails(item)}
                       >
                         <TableCell className="font-semibold">
                           {parsed ? (
@@ -3064,7 +3112,7 @@ function ImportPanel(props: {
                                 "h-7 px-2 text-xs",
                                 isSelected && "bg-blue-100 text-blue-800 dark:bg-blue-900",
                               )}
-                              onClick={() => setActiveFileId(item.id)}
+                              onClick={() => showFileDetails(item)}
                             >
                               詳細
                             </Button>
@@ -3153,7 +3201,7 @@ function ImportPanel(props: {
         </Card>
 
       {activeItem && activeItem.parsed && (
-        <Card className="border-blue-200 dark:border-blue-900">
+        <Card ref={detailCard} tabIndex={-1} className="border-blue-200 dark:border-blue-900">
           <CardHeader className="pb-3">
             <div className="flex items-start justify-between gap-4">
               <div>
@@ -3225,6 +3273,24 @@ function ImportPanel(props: {
           </CardContent>
         </Card>
       )}
+      <Dialog open={errorDetails !== null} onOpenChange={(open) => { if (!open) setErrorDetails(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{errorDetails?.parsed ? "登録エラーの詳細" : "解析エラーの詳細"}</DialogTitle>
+            <DialogDescription className="break-all">{errorDetails?.fileName}</DialogDescription>
+          </DialogHeader>
+          <Alert variant="destructive">
+            <AlertCircle />
+            <AlertTitle>エラー内容</AlertTitle>
+            <AlertDescription className="max-h-[50vh] overflow-auto whitespace-pre-wrap break-all select-text">
+              {errorDetails?.error}
+            </AlertDescription>
+          </Alert>
+          <DialogFooter>
+            <Button onClick={() => setErrorDetails(null)}>閉じる</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
