@@ -1,3 +1,4 @@
+vi.mock("./api-client", () => ({ apiFetch: (...args: Parameters<typeof fetch>) => fetch(...args) }));
 import { afterEach, expect, it, vi } from "vitest";
 import { createAttendanceCache } from "./attendance-cache";
 

@@ -1,3 +1,4 @@
+import { apiFetch } from "./api-client";
 // In-memory cache scoped to one dashboard session; no employee data is persisted.
 export function createAttendanceCache() {
   const requests = new Map<string, Promise<Response>>();
@@ -6,7 +7,7 @@ export function createAttendanceCache() {
     async fetch(url: string): Promise<Response> {
       let request = requests.get(url);
       if (!request) {
-        request = fetch(url, { cache: "no-store" });
+        request = apiFetch(url, { cache: "no-store" });
         requests.set(url, request);
       }
       try {

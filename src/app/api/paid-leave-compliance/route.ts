@@ -1,3 +1,4 @@
+import { authorizeApi } from "@/lib/api-auth";
 import { and, asc, eq, gte, lt } from "drizzle-orm";
 import {
   employeeMonthExclusions,
@@ -24,6 +25,8 @@ function previousMonth(targetMonth: string) {
 }
 
 export async function GET(request: Request) {
+  const authError = await authorizeApi(request);
+  if (authError) return authError;
   if (!databaseConfigured)
     return Response.json({ databaseConfigured: false, asOf: getTokyoDateString(), items: [] });
 

@@ -1,3 +1,4 @@
+import { authorizeApi } from "@/lib/api-auth";
 import { asc, eq } from "drizzle-orm";
 import { databaseConfigured, getDb } from "@/db";
 import {
@@ -17,7 +18,9 @@ function averageOvertime(rows: { overtimeHours: number }[]) {
   return rows.reduce((sum, row) => sum + row.overtimeHours, 0) / rows.length;
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  const authError = await authorizeApi(request);
+  if (authError) return authError;
   if (!databaseConfigured) {
     return Response.json({ databaseConfigured: false, summaries: [] });
   }
