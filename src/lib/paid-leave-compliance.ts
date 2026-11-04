@@ -2,6 +2,12 @@ export type PaidLeaveCycleStartMonth = 4 | 10;
 
 const pad = (value: number) => String(value).padStart(2, "0");
 
+export function isValidAsOfDate(value: string) {
+  if (!/^20\d{2}-(0[1-9]|1[0-2])-([012]\d|3[01])$/.test(value)) return false;
+  const [year, month, day] = value.split("-").map(Number);
+  return new Date(Date.UTC(year, month - 1, day)).toISOString().slice(0, 10) === value;
+}
+
 export function getTokyoDateString(date = new Date()) {
   return new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Tokyo",

@@ -1,3 +1,4 @@
+import { authorizeApi } from "@/lib/api-auth";
 import { asc } from "drizzle-orm";
 import { employees } from "@/db/schema";
 import { databaseConfigured, getDb } from "@/db";
@@ -7,6 +8,8 @@ import { importPreviewSchema } from "@/lib/validation";
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
+  const authError = await authorizeApi(request);
+  if (authError) return authError;
   if (!databaseConfigured) return Response.json({ error: "DATABASE_URLが設定されていません。" }, { status: 503 });
   const parsed = importPreviewSchema.safeParse(await request.json());
   if (!parsed.success) return Response.json({ error: "取込データの形式が不正です。" }, { status: 400 });

@@ -1,3 +1,4 @@
+import { authorizeApi } from "@/lib/api-auth";
 import { asc, eq } from "drizzle-orm";
 import {
   employeeMonthExclusions,
@@ -12,7 +13,9 @@ export const runtime = "nodejs";
 
 const vacationFields = ["有休 日数", "特別休暇 日数", "代休 日数", "夏季休暇 日数"];
 
-export async function GET() {
+export async function GET(request: Request) {
+  const authError = await authorizeApi(request);
+  if (authError) return authError;
   if (!databaseConfigured)
     return Response.json({ databaseConfigured: false, summaries: [] });
 

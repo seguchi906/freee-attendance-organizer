@@ -1,3 +1,4 @@
+import { authorizeApi } from "@/lib/api-auth";
 import { eq } from "drizzle-orm";
 import {
   employeeMonthExclusions,
@@ -12,6 +13,8 @@ import { importCommitSchema } from "@/lib/validation";
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
+  const authError = await authorizeApi(request);
+  if (authError) return authError;
   if (!databaseConfigured)
     return Response.json(
       { error: "DATABASE_URLが設定されていません。" },

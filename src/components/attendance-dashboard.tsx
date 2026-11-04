@@ -1,5 +1,7 @@
 "use client";
 
+import { apiFetch } from "@/lib/api-client";
+
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
@@ -237,7 +239,7 @@ export function AttendanceDashboard() {
         const targetPeriod = getPeriodFromTargetMonth(result.targetMonth);
         let targetDashboard = dashboardsByPeriod.get(targetPeriod);
         if (!targetDashboard) {
-          const response = await fetch(`/api/dashboard?period=${targetPeriod}`, {
+          const response = await apiFetch(`/api/dashboard?period=${targetPeriod}`, {
             cache: "no-store",
           });
           const data = await response.json();
@@ -292,6 +294,21 @@ export function AttendanceDashboard() {
       if (!b.parsed) return -1;
       return a.parsed.targetMonth.localeCompare(b.parsed.targetMonth);
     });
+
+    // 同じ対象月を複数登録すると、先に登録したファイルが後の内容で
+    // 意図せず置き換わるおそれがあるため、選択時点で確認を止める。
+    const selectedMonths = new Set<string>();
+    for (const item of items) {
+      const targetMonth = item.parsed?.targetMonth;
+      if (!targetMonth) continue;
+      if (selectedMonths.has(targetMonth)) {
+        item.error = `${targetMonth}のファイルが複数選択されています。対象月ごとに1ファイルだけ選択してください。`;
+        item.status = "error";
+        item.statusMessage = "対象月の重複";
+      } else {
+        selectedMonths.add(targetMonth);
+      }
+    }
 
     setBatchFiles(items);
     setActiveFileId(items[0]?.id ?? null);
@@ -392,7 +409,7 @@ export function AttendanceDashboard() {
       );
 
       try {
-        const response = await fetch("/api/imports", {
+        const response = await apiFetch("/api/imports", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -2719,7 +2736,7 @@ function StatusTable({
               className="flex items-center gap-1.5 font-medium shadow-sm bg-blue-600 hover:bg-blue-700 text-white cursor-pointer"
             >
               <Upload className="size-4" />
-              Excel取込
+              過去月を一括取込
             </Button>
           </div>
         </div>
@@ -2949,7 +2966,7 @@ function ImportPanel(props: {
                 読み込みファイル一覧（{batchFiles.length}件）
               </CardTitle>
               <CardDescription>
-                対象年月順（昇順）に並んでいます。内容を確認して一括登録してください。
+                複数の過去月ファイルを選択できます。対象年月順（昇順）に確認後、一括登録してください。登録済みの月は置換対象として表示されます。
               </CardDescription>
             </div>
               <div className="flex flex-wrap items-center gap-2">
@@ -4128,7 +4145,7 @@ function EmployeeDialog({
   async function save() {
     if (!employee) return;
     setError("");
-    const response = await fetch(
+    const response = await apiFetch(
       `/api/employees/${encodeURIComponent(employee.employeeCode)}`,
       {
         method: "PATCH",
