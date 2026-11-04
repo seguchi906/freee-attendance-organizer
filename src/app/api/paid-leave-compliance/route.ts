@@ -13,6 +13,7 @@ import {
   getPaidLeavePeriod,
   getTokyoDateString,
   listMonths,
+  isValidAsOfDate,
   type PaidLeaveCycleStartMonth,
 } from "@/lib/paid-leave-compliance";
 
@@ -32,7 +33,7 @@ export async function GET(request: Request) {
 
   const requestedAsOf = new URL(request.url).searchParams.get("asOf");
   const asOf = requestedAsOf ?? getTokyoDateString();
-  if (!/^20\d{2}-(0[1-9]|1[0-2])-([012]\d|3[01])$/.test(asOf))
+  if (!isValidAsOfDate(asOf))
     return Response.json({ error: "基準日の指定が不正です。" }, { status: 400 });
 
   const aprilPeriod = getPaidLeavePeriod(asOf, 4);

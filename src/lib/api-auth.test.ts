@@ -1,7 +1,12 @@
 // @vitest-environment node
 import { beforeAll, beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { generateKeyPair, SignJWT, type JWTVerifyGetKey } from "jose";
-import { verifyAttendanceToken, readAuthorizationConfig } from "./api-auth";
+import {
+  authorizeApi,
+  classifyJwtValidationError,
+  verifyAttendanceToken,
+  readAuthorizationConfig,
+} from "./api-auth";
 import {
   ATTENDANCE_API_CLIENT_ID as aud,
   ATTENDANCE_API_TENANT_ID as tid,
@@ -75,10 +80,47 @@ it.each([
 });
 it("rejects invalid signatures and malformed tokens", async () => {
   const other = await generateKeyPair("RS256");
-  for (const value of [await token({}, other.privateKey), "not-a-jwt"])
+  for (const [value, diagnosticCode] of [
+    [await token({}, other.privateKey), "signature_invalid"],
+    ["not-a-jwt", "jwt_malformed"],
+  ] as const)
     await expect(
       verifyAttendanceToken(value, config, getKey),
-    ).rejects.toMatchObject({ status: 401 });
+    ).rejects.toMatchObject({ status: 401, diagnosticCode });
+});
+
+it.each([
+  [{ code: "ERR_JWT_EXPIRED" }, "expired"],
+  [{ code: "ERR_JWT_CLAIM_VALIDATION_FAILED", claim: "iss" }, "issuer_mismatch"],
+  [{ code: "ERR_JWT_CLAIM_VALIDATION_FAILED", claim: "aud" }, "audience_mismatch"],
+  [{ code: "ERR_JWS_SIGNATURE_VERIFICATION_FAILED" }, "signature_invalid"],
+  [{ code: "ERR_JWKS_TIMEOUT" }, "jwks_timeout"],
+  [{ code: "ERR_JWKS_NO_MATCHING_KEY" }, "jwks_key_not_found"],
+  [{ code: "ERR_JOSE_GENERIC" }, "jwks_response_invalid"],
+  [Object.assign(new TypeError(), { cause: { code: "ECONNRESET" } }), "jwks_fetch_failed"],
+  [Object.assign(new TypeError(), { cause: { code: "CERT_HAS_EXPIRED" } }), "jwks_tls_error"],
+  [{ code: "unrecognized" }, "unknown_validation_error"],
+])("classifies jose validation failures without exposing their messages", (error, code) => {
+  expect(classifyJwtValidationError(error)).toBe(code);
+});
+
+it("returns a development-only missing bearer classification", async () => {
+  vi.stubEnv("NODE_ENV", "development");
+  const response = await authorizeApi(new Request("http://localhost/api/session"));
+  expect(response?.status).toBe(401);
+  await expect(response?.json()).resolves.toMatchObject({
+    error: "Authentication required",
+    diagnosticCode: "missing_bearer",
+  });
+});
+
+it("omits authentication diagnostic codes outside development", async () => {
+  vi.stubEnv("NODE_ENV", "production");
+  const response = await authorizeApi(new Request("http://localhost/api/session"));
+  expect(response?.status).toBe(401);
+  await expect(response?.json()).resolves.toEqual({
+    error: "Authentication required",
+  });
 });
 it("refuses a mapping outside the existing permission range", async () => {
   await expect(

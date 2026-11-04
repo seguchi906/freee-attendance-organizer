@@ -6,6 +6,12 @@ import {
   setApiTokenProvider,
 } from "@/lib/api-client";
 import { ATTENDANCE_API_SCOPE } from "@/lib/api-access-token";
+import {
+  createAuthDiagnostic,
+  readSafeServerDiagnosticCode,
+  safeMsalErrorCode,
+  type AuthDiagnostic,
+} from "@/lib/auth-diagnostics";
 
 import { useEffect, useState, type ReactNode } from "react";
 import { InteractionStatus } from "@azure/msal-browser";
@@ -17,6 +23,7 @@ import {
   silentRequest,
 } from "@/components/auth/auth-config";
 import { AuthMessageScreen } from "@/components/auth/auth-screen";
+import { AuthDiagnosticDetails } from "@/components/auth/auth-diagnostic";
 import {
   findAllowedEmail,
   getAccountEmailCandidates,
@@ -34,7 +41,7 @@ type GateState =
     }
   | { status: "unauthenticated" }
   | { status: "forbidden"; candidates: string[] }
-  | { status: "error"; message: string };
+  | { status: "error"; message: string; diagnostic?: AuthDiagnostic };
 
 const allowedEmails = parseCommaSeparated(allowedAuthEmailsConfig);
 
@@ -93,6 +100,11 @@ function AuthStateView({
       mode="error"
       title="認証情報を確認できませんでした"
       message={state.message}
+      details={
+        state.diagnostic ? (
+          <AuthDiagnosticDetails diagnostic={state.diagnostic} />
+        ) : undefined
+      }
       action={
         onLogin ? (
           <button
@@ -218,6 +230,12 @@ export function DirectAuthGate({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (inProgress !== InteractionStatus.None) return;
     let active = true;
+    let diagnostic = createAuthDiagnostic(
+      process.env.NODE_ENV,
+      "api_session_request",
+      null,
+      "api_request_failed",
+    );
     const unsubscribe = onApiSessionInvalidated(() => {
       if (active)
         setState({
@@ -231,20 +249,62 @@ export function DirectAuthGate({ children }: { children: ReactNode }) {
         instance.getActiveAccount() ??
         accounts[0] ??
         instance.getAllAccounts()[0];
-      if (!account) throw new Error("Microsoft login required");
-      const result = await instance.acquireTokenSilent({
-        scopes: [ATTENDANCE_API_SCOPE],
-        account,
-      });
+      if (!account) {
+        diagnostic = createAuthDiagnostic(
+          process.env.NODE_ENV,
+          "api_token_acquisition",
+          null,
+          "account_not_available",
+        );
+        throw new Error("Microsoft login required");
+      }
+      let result;
+      try {
+        result = await instance.acquireTokenSilent({
+          scopes: [ATTENDANCE_API_SCOPE],
+          account,
+        });
+      } catch (error) {
+        diagnostic = createAuthDiagnostic(
+          process.env.NODE_ENV,
+          "api_token_acquisition",
+          null,
+          safeMsalErrorCode(error),
+        );
+        throw error;
+      }
       if (
         !active ||
         (instance.getActiveAccount() ?? instance.getAllAccounts()[0])
           ?.homeAccountId !== account.homeAccountId
-      )
+      ) {
+        diagnostic = createAuthDiagnostic(
+          process.env.NODE_ENV,
+          "api_token_acquisition",
+          null,
+          "account_context_changed",
+        );
         throw new Error("API session changed");
+      }
+      const expiresAt = result.expiresOn?.getTime() ?? 0;
+      if (!result.accessToken || expiresAt <= Date.now() + 60000) {
+        diagnostic = createAuthDiagnostic(
+          process.env.NODE_ENV,
+          "api_token_acquisition",
+          null,
+          "api_token_unusable",
+        );
+      } else {
+        diagnostic = createAuthDiagnostic(
+          process.env.NODE_ENV,
+          "api_session_request",
+          null,
+          "api_request_failed",
+        );
+      }
       return {
         accessToken: result.accessToken,
-        expiresAt: result.expiresOn?.getTime() ?? 0,
+        expiresAt,
       };
     });
     void (async () => {
@@ -276,10 +336,21 @@ export function DirectAuthGate({ children }: { children: ReactNode }) {
       try {
         const response = await apiFetch("/api/session");
         if (!active) return;
-        if (!response.ok)
+        if (!response.ok) {
+          const serverCode =
+            process.env.NODE_ENV === "development"
+              ? await readSafeServerDiagnosticCode(response)
+              : undefined;
+          diagnostic = createAuthDiagnostic(
+            process.env.NODE_ENV,
+            "api_session_response",
+            response.status,
+            serverCode,
+          );
           throw new Error(
             "API認証または利用権限を確認できませんでした。管理者に設定を確認してください。",
           );
+        }
         setState({
           status: "authenticated",
           email,
@@ -292,6 +363,7 @@ export function DirectAuthGate({ children }: { children: ReactNode }) {
             status: "error",
             message:
               "API認証を取得できませんでした。再ログインするか管理者に確認してください。",
+            diagnostic,
           });
       }
     })();
